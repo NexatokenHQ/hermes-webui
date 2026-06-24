@@ -63,6 +63,8 @@ function makeElement(tagName) {
     onpointerleave: null,
     onwheel: null,
     classList: null,
+    capturedPointerId: null,
+    releasedPointerId: null,
     appendChild(child) {
       if (child.parentNode) child.parentNode.removeChild(child);
       this.children.push(child);
@@ -97,6 +99,13 @@ function makeElement(tagName) {
     },
     getBoundingClientRect() {
       return {left: 0, top: 0, width: this.clientWidth, height: this.clientHeight};
+    },
+    setPointerCapture(pointerId) {
+      this.capturedPointerId = pointerId;
+    },
+    releasePointerCapture(pointerId) {
+      this.releasedPointerId = pointerId;
+      if (this.capturedPointerId === pointerId) this.capturedPointerId = null;
     },
     cloneNode() {
       const copy = makeElement(this.tagName);
@@ -183,7 +192,6 @@ function runScenario(payload) {
 
   if (payload.scenario === 'toolbar') {
     result.hasInlineFullscreen = result.labels.includes('Fullscreen');
-    result.hasLightboxFullscreen = result.labels.includes('Fullscreen');
     return result;
   }
 
@@ -202,7 +210,11 @@ function runScenario(payload) {
     const beforeWheel = {scale: state.scale, x: state.x, y: state.y};
     state.viewport.onwheel({deltaY: -120, clientX: 240, clientY: 160, preventDefault() {}});
     const afterWheel = {scale: state.scale, x: state.x, y: state.y};
-    return {fitScale, zoomInScale, zoomOutScale, maxScale, reset, beforeWheel, afterWheel};
+    state.fit();
+    const beforeLineWheel = {scale: state.scale, x: state.x, y: state.y};
+    state.viewport.onwheel({deltaY: -3, deltaMode: 1, clientX: 240, clientY: 160, preventDefault() {}});
+    const afterLineWheel = {scale: state.scale, x: state.x, y: state.y};
+    return {fitScale, zoomInScale, zoomOutScale, maxScale, reset, beforeWheel, afterWheel, beforeLineWheel, afterLineWheel};
   }
 
   if (payload.scenario === 'drag') {
@@ -217,11 +229,18 @@ function runScenario(payload) {
     interactiveState.viewport.getBoundingClientRect = () => ({left: 0, top: 0, width: interactiveState.viewport.clientWidth, height: interactiveState.viewport.clientHeight});
     interactiveState.fit();
     const start = {x: interactiveState.x, y: interactiveState.y, scale: interactiveState.scale};
-    interactiveState.viewport.onpointerdown({button: 0, clientX: 100, clientY: 100, preventDefault() {}});
+    interactiveState.viewport.onpointerdown({button: 0, clientX: 100, clientY: 100, pointerId: 7, preventDefault() {}});
     interactiveState.viewport.onpointermove({clientX: 160, clientY: 150});
-    interactiveState.viewport.onpointerup({preventDefault() {}});
+    interactiveState.viewport.onpointerup({pointerId: 7, preventDefault() {}});
     interactiveState.viewport.onclick({preventDefault() {}, stopPropagation() {}, target: interactiveState.viewport});
-    const afterDrag = {x: interactiveState.x, y: interactiveState.y, dragged: interactiveState.dragged, opens: opens.length};
+    const afterDrag = {
+        x: interactiveState.x,
+        y: interactiveState.y,
+        dragged: interactiveState.dragged,
+        opens: opens.length,
+        releasedPointerId: interactiveState.viewport.releasedPointerId,
+        capturedPointerId: interactiveState.viewport.capturedPointerId,
+    };
     interactiveState.dragged = false;
     interactiveState.viewport.onclick({preventDefault() {}, stopPropagation() {}, target: interactiveState.viewport});
     const afterClick = {opens: opens.length};
@@ -302,6 +321,7 @@ def test_zoom_fit_reset_and_wheel_update_state(_driver_path):
     assert result["reset"]["scale"] == 1
     assert result["afterWheel"]["scale"] > result["beforeWheel"]["scale"]
     assert (result["afterWheel"]["x"], result["afterWheel"]["y"]) != (result["beforeWheel"]["x"], result["beforeWheel"]["y"])
+    assert result["afterLineWheel"]["scale"] > result["beforeLineWheel"]["scale"] * 1.1
 
 
 def test_drag_suppresses_accidental_lightbox_open(_driver_path):
@@ -310,6 +330,8 @@ def test_drag_suppresses_accidental_lightbox_open(_driver_path):
     assert result["start"]["scale"] > 0
     assert (result["afterDrag"]["x"], result["afterDrag"]["y"]) != (result["start"]["x"], result["start"]["y"])
     assert result["afterDrag"]["opens"] == 0
+    assert result["afterDrag"]["releasedPointerId"] == 7
+    assert result["afterDrag"]["capturedPointerId"] is None
     assert result["afterClick"]["opens"] == 1
 
 

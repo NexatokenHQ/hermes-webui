@@ -1393,6 +1393,7 @@ function _mountMermaidViewer(svgEl, options = {}) {
     dragging: false,
     dragOriginX: 0,
     dragOriginY: 0,
+    dragPointerId: null,
     dragStartX: 0,
     dragStartY: 0,
     dragged: false,
@@ -1477,7 +1478,9 @@ function _mountMermaidViewer(svgEl, options = {}) {
     const rect = viewport.getBoundingClientRect ? viewport.getBoundingClientRect() : {left: 0, top: 0};
     const anchorX = Number.isFinite(e.clientX) ? e.clientX - rect.left : undefined;
     const anchorY = Number.isFinite(e.clientY) ? e.clientY - rect.top : undefined;
-    const factor = Math.exp((-(Number(e.deltaY) || 0)) * 0.0015);
+    const deltaMode = Number(e.deltaMode) || 0;
+    const lineScale = deltaMode === 1 ? 30 : deltaMode === 2 ? 600 : 1;
+    const factor = Math.exp((-(Number(e.deltaY) || 0)) * lineScale * 0.0015);
     _setScale(state.scale * factor, anchorX, anchorY);
   }
 
@@ -1487,9 +1490,11 @@ function _mountMermaidViewer(svgEl, options = {}) {
     state.dragged = false;
     state.dragOriginX = Number(e.clientX) || 0;
     state.dragOriginY = Number(e.clientY) || 0;
+    state.dragPointerId = e.pointerId != null ? e.pointerId : null;
     state.dragStartX = state.x;
     state.dragStartY = state.y;
     viewport.classList.add('is-panning');
+    if(state.dragPointerId != null && viewport.setPointerCapture) viewport.setPointerCapture(state.dragPointerId);
     if(e.preventDefault) e.preventDefault();
   }
 
@@ -1506,6 +1511,10 @@ function _mountMermaidViewer(svgEl, options = {}) {
   function _endPointerDrag(){
     if(!state.dragging) return;
     state.dragging = false;
+    if(state.dragPointerId != null && viewport.releasePointerCapture){
+      try{ viewport.releasePointerCapture(state.dragPointerId); }catch(_){}
+    }
+    state.dragPointerId = null;
     viewport.classList.remove('is-panning');
   }
 
