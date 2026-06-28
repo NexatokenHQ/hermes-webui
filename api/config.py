@@ -7463,6 +7463,10 @@ def get_gateway_caps(base_url: str, api_key: str = "") -> dict:
             features = {}
         caps["approval_events"] = bool(features.get("approval_events"))
         caps["run_approval_response"] = bool(features.get("run_approval_response"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            caps["capabilities_reachable"] = True
+        caps["probe_error"] = f"{type(exc).__name__}: {exc}"
     except Exception as exc:
         caps["probe_error"] = f"{type(exc).__name__}: {exc}"
     with _GATEWAY_CAPS_LOCK:

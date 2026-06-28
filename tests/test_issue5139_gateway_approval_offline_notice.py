@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -90,6 +92,72 @@ def test_gateway_chat_emits_offline_warning_for_unreachable_probe():
 
 def test_gateway_chat_keeps_unsupported_warning_for_reachable_older_gateway():
     events = _run_gateway_warning_case("unsupported")
+    warnings = [item for item in events if isinstance(item, tuple) and item[0] == "warning"]
+    assert warnings
+    assert warnings[0][1]["type"] == "approval_gateway_unsupported"
+    assert warnings[0][1]["message"] == "Approvals require a newer gateway. Upgrade the connected Hermes gateway to enable this."
+    assert any(isinstance(item, tuple) and item[0] == "done" for item in events)
+    assert not any(
+        isinstance(item, tuple) and item[0] == "warning" and item[1].get("type") == "approval_gateway_offline"
+        for item in events
+    )
+
+
+def test_gateway_chat_keeps_unsupported_warning_for_404_capabilities_probe():
+    events = []
+    q = MagicMock()
+    q.put_nowait = lambda item: events.append(item)
+
+    stream_id = "sid-http-404"
+    with STREAMS_LOCK:
+        STREAMS[stream_id] = q
+
+    mock_session = MagicMock()
+    mock_session.active_stream_id = stream_id
+    mock_session.workspace = "/tmp"
+    mock_session.model = "test"
+    mock_session.model_provider = None
+    mock_session.profile = None
+    mock_session.context_messages = []
+    mock_session.messages = []
+    mock_session.pending_user_message = None
+    mock_session.pending_attachments = None
+    mock_session.pending_started_at = None
+    mock_session._approval_notice_emitted = False
+
+    def fake_urlopen(req, *, timeout=None):
+        if req.full_url == "http://127.0.0.1:8642/v1/capabilities":
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=io.BytesIO(b""))
+        assert req.full_url == "http://127.0.0.1:8642/v1/chat/completions"
+        resp = MagicMock()
+        resp.__iter__ = lambda s: iter(
+            [
+                b'data: {"choices":[{"delta":{"content":"Done"}}]}\n',
+                b"\n",
+                b"data: [DONE]\n",
+            ]
+        )
+        resp.__enter__ = lambda s: s
+        resp.__exit__ = lambda s, *a: None
+        return resp
+
+    try:
+        with patch.dict("os.environ", {"HERMES_WEBUI_CHAT_BACKEND": "gateway"}):
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+                 patch("api.gateway_chat.get_session", return_value=mock_session), \
+                 patch("api.gateway_chat._stream_writeback_is_current", return_value=True), \
+                 patch("api.gateway_chat.merge_session_messages_append_only", return_value=[]):
+                _run_gateway_chat_streaming(
+                    session_id="sess-404",
+                    msg_text="hi",
+                    model="test-model",
+                    workspace="/tmp",
+                    stream_id=stream_id,
+                )
+    finally:
+        with STREAMS_LOCK:
+            STREAMS.pop(stream_id, None)
+
     warnings = [item for item in events if isinstance(item, tuple) and item[0] == "warning"]
     assert warnings
     assert warnings[0][1]["type"] == "approval_gateway_unsupported"

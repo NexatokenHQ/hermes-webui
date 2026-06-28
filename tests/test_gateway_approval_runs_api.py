@@ -92,6 +92,31 @@ def test_gateway_capability_detection_marks_probe_failures_unreachable():
     invalidate_gateway_caps()
 
 
+def test_gateway_capability_detection_treats_404_probe_as_reachable_unsupported():
+    """Older reachable gateways can 404 /v1/capabilities without becoming "offline"."""
+    from api.config import (
+        gateway_approval_unavailable_reason,
+        gateway_supports_approval,
+        get_gateway_caps,
+        invalidate_gateway_caps,
+    )
+
+    invalidate_gateway_caps()
+
+    def _fake_urlopen_404(req, *, timeout=None):
+        assert req.full_url == "http://fake:7777/v1/capabilities"
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", hdrs=None, fp=io.BytesIO(b""))
+
+    with patch("urllib.request.urlopen", side_effect=_fake_urlopen_404):
+        caps = get_gateway_caps("http://fake:7777", "secret")
+        assert caps["capabilities_reachable"] is True
+        assert caps["probe_error"]
+        assert gateway_approval_unavailable_reason("http://fake:7777", "secret") == "unsupported"
+        assert gateway_supports_approval("http://fake:7777", "secret") is False
+
+    invalidate_gateway_caps()
+
+
 def test_gateway_capability_cache_keeps_fresher_success_on_probe_race():
     """A slower failed probe must not overwrite a fresher successful capability result."""
     from api.config import gateway_supports_approval, invalidate_gateway_caps

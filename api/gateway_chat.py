@@ -639,8 +639,8 @@ def _run_gateway_chat_streaming(
         else:
             # Legacy gateway path: emit unsupported approval notice once per session,
             # but only when the gateway genuinely lacks approval capability.
-            if not gateway_supports_approval(base_url, api_key):
-                approval_reason = gateway_approval_unavailable_reason(base_url, api_key)
+            approval_reason = gateway_approval_unavailable_reason(base_url, api_key)
+            if approval_reason is not None:
                 if not hasattr(s, "_approval_notice_emitted"):
                     s._approval_notice_emitted = False
                 if not s._approval_notice_emitted:
