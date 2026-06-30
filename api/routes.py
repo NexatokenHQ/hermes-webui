@@ -2351,6 +2351,7 @@ from api.config import (
     ACTIVE_RUNS_LOCK,
     register_stream_owner,
     stream_owner_session_id,
+    unregister_stream_owner,
     CHAT_LOCK,
     _get_session_agent_lock,
     SESSION_AGENT_LOCKS,
@@ -17479,6 +17480,10 @@ def _active_run_stream_for_session(session_id: str | None) -> str | None:
                 return stream_id
             for stale_stream_id in stale_stream_ids:
                 (_live_config.ACTIVE_RUNS or {}).pop(stale_stream_id, None)
+                # The zombie run is pruned directly here (not via the normal teardown
+                # finally / unregister_active_run), so release its stream-owner entry too
+                # or STREAM_SESSION_OWNERS leaks for every reconciled zombie. (#5198 gate)
+                unregister_stream_owner(stale_stream_id)
     except Exception:
         return None
     return None

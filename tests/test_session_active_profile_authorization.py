@@ -511,3 +511,34 @@ def test_session_new_keeps_prev_session_commit_for_same_profile(monkeypatch):
     assert calls["commit"] == 1
     assert calls["new"] == 1
     assert cap["ok"]["session"]["session_id"] == "new_session"
+
+
+def test_stream_owner_unregistered_on_worker_early_return(monkeypatch):
+    """A stream cancelled before the worker starts (q is None) must not leak its owner entry.
+
+    The route layer registers the stream owner synchronously before launching the
+    worker. If the stream is cancelled before the worker reaches `q = STREAMS.get(...)`,
+    the worker early-returns before register_active_run / the teardown finally — so the
+    owner entry must be released on that early-return path or STREAM_SESSION_OWNERS leaks.
+    """
+    from api import config
+    import api.streaming as streaming
+
+    with config.STREAM_SESSION_OWNERS_LOCK:
+        previous = dict(config.STREAM_SESSION_OWNERS)
+        config.STREAM_SESSION_OWNERS.clear()
+    # Owner registered by the route layer, but the stream was already cancelled
+    # (never placed in STREAMS), so the worker will hit `q is None`.
+    config.register_stream_owner("leak-stream", "some_session")
+    try:
+        with config.STREAMS_LOCK:
+            config.STREAMS.pop("leak-stream", None)
+        streaming._run_agent_streaming(
+            "some_session", "hi", "m", "/tmp", "leak-stream",
+        )
+        with config.STREAM_SESSION_OWNERS_LOCK:
+            assert "leak-stream" not in config.STREAM_SESSION_OWNERS
+    finally:
+        with config.STREAM_SESSION_OWNERS_LOCK:
+            config.STREAM_SESSION_OWNERS.clear()
+            config.STREAM_SESSION_OWNERS.update(previous)
