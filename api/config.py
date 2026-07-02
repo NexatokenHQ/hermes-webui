@@ -8198,7 +8198,6 @@ def load_settings() -> dict:
     """Load settings from disk, merging with defaults for any missing keys."""
     settings = dict(_SETTINGS_DEFAULTS)
     stored = _read_raw_settings_file()
-    persisted_speech_keys = _extract_persisted_speech_keys(stored)
     if isinstance(stored, dict):
         if (
             "worklog_details_expanded_default" not in stored
