@@ -1,7 +1,35 @@
 """Tests for issue #4536 — main-model service_tier persistence and guarded forwarding."""
 
+import pytest
+
 
 class TestIssue4536ServiceTier:
+    @pytest.fixture(autouse=True)
+    def _isolate_config_globals(self):
+        """Make these tests hermetic against a leaked `config.cfg` rebind.
+
+        get_auxiliary_models() reads the module-global `config.cfg` after
+        reload_config() refreshes `_cfg_cache`. If an EARLIER test in the full
+        suite rebound `config.cfg` to its own dict via monkeypatch and its
+        teardown left `cfg is not _cfg_cache`, then `_cfg_has_in_memory_overrides()`
+        stays True and get_auxiliary_models() reads that stale dict instead of the
+        freshly-reloaded temp config — the root cause of this test's full-suite-only
+        flake (passes in isolation). Re-alias `cfg` to the live cache and clear the
+        override fingerprint before AND after, so neither an inherited leak nor our
+        own run can poison a neighbor.
+        """
+        from api import config
+
+        def _reset():
+            with config._cfg_lock:
+                config.cfg = config._cfg_cache
+                config._cfg_fingerprint = None
+                config._cfg_mtime = 0.0
+
+        _reset()
+        yield
+        _reset()
+
     def test_main_service_tier_roundtrip_via_auxiliary_endpoint(self, monkeypatch, tmp_path):
         """service_tier set on main model should persist in config and return via /api/model/auxiliary payload."""
         from api import config
