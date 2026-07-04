@@ -378,6 +378,32 @@ const keylessRowsAfterThird = turn.querySelectorAll('.transparent-event-row[data
 _renderLiveAnchorActivitySceneTransparent('stream-1', fourthScene, {{ sessionId:'session-1' }});
 const keylessRowsAfterFourth = turn.querySelectorAll('.transparent-event-row[data-anchor-row-id=\"\"]');
 
+const fadeParent = new FakeElement('div');
+const fadeExisting = new FakeElement('div');
+fadeExisting.className = 'assistant-segment transparent-event-row';
+fadeExisting.setAttribute('data-anchor-row-role', 'prose');
+fadeExisting.setAttribute('data-anchor-row-id', 'fade-row');
+fadeExisting.setAttribute('data-anchor-source-event-type', 'process_prose');
+const staleBody = new FakeElement('div');
+staleBody.className = 'msg-body';
+staleBody.textContent = 'old flat text';
+fadeExisting.appendChild(staleBody);
+fadeParent.appendChild(fadeExisting);
+
+const fadeCandidate = new FakeElement('div');
+fadeCandidate.className = 'assistant-segment transparent-event-row';
+fadeCandidate.setAttribute('data-anchor-row-role', 'prose');
+fadeCandidate.setAttribute('data-anchor-row-id', 'fade-row');
+fadeCandidate.setAttribute('data-anchor-source-event-type', 'process_prose');
+const fadeBody = new FakeElement('div');
+fadeBody.className = 'msg-body stream-fade-active';
+const fadeSpan = new FakeElement('span');
+fadeSpan.className = 'stream-fade-word is-new';
+fadeSpan.textContent = 'new';
+fadeBody.appendChild(fadeSpan);
+fadeCandidate.appendChild(fadeBody);
+const fadeRefresh = _refreshTransparentLiveRow(fadeExisting, fadeCandidate);
+
 process.stdout.write(JSON.stringify({{
   firstRender,
   secondRender,
@@ -402,6 +428,11 @@ process.stdout.write(JSON.stringify({{
   keylessAfterFourth: keylessRowsAfterFourth.length,
   keylessTextsAfterFourth: keylessRowsAfterFourth.map((child) => child.textContent),
   totalRowsAfterFourth: turn.children.filter((child) => child.classList.contains('transparent-event-row')).length,
+  fadeReplacedWithCandidate: fadeRefresh === fadeCandidate,
+  fadeExistingRemoved: fadeExisting.parentNode === null,
+  fadeCandidateParented: fadeCandidate.parentNode === fadeParent,
+  fadeSpanPreserved: !!fadeParent.querySelector('.stream-fade-word.is-new'),
+  fadeBodyActive: !!fadeParent.querySelector('.msg-body.stream-fade-active'),
 }}));
 """
     script = script.replace("{{", "{").replace("}}", "}")
@@ -438,6 +469,11 @@ process.stdout.write(JSON.stringify({{
     assert data["keylessAfterFourth"] == 1
     assert data["keylessTextsAfterFourth"] == ["keyless row second"]
     assert data["totalRowsAfterFourth"] == 1
+    assert data["fadeReplacedWithCandidate"] is True
+    assert data["fadeExistingRemoved"] is True
+    assert data["fadeCandidateParented"] is True
+    assert data["fadeSpanPreserved"] is True
+    assert data["fadeBodyActive"] is True
 
 
 @pytest.mark.skipif(NODE is None, reason="node not on PATH")
