@@ -44,12 +44,22 @@ def _draft_restore_suppression_block() -> str:
     return SESSIONS_JS[start:end]
 
 
-def _run_case(*, initial_text: str, draft: dict | None, opts: dict | None, current_sid, force_reload: bool, suppress_restore: bool = False) -> dict:
+def _run_case(*, initial_text: str, draft: dict | None, opts: dict | None, current_sid, force_reload: bool, suppress_restore: bool | dict = False) -> dict:
     if NODE is None:
         pytest.skip("node not on PATH")
     restore_fn = _function_block(SESSIONS_JS, "function _restoreComposerDraft(draft, targetSid, opts={}) {")
     draft_block = _draft_restore_block()
     suppression_block = _draft_restore_suppression_block()
+    if isinstance(suppress_restore, dict):
+        suppress_call = (
+            "_suppressComposerDraftRestoreAfterSubmit("
+            f"sid, {json.dumps(suppress_restore.get('text', ''))}, {json.dumps(suppress_restore.get('files', []))}"
+            ");"
+        )
+    elif suppress_restore:
+        suppress_call = "_suppressComposerDraftRestoreAfterSubmit(sid);"
+    else:
+        suppress_call = ""
     script = f"""
 const state = {{
   value: {json.dumps(initial_text)},
@@ -65,13 +75,14 @@ function autoResize() {{
 function updateSendBtn() {{
   state.updateSendBtnCount += 1;
 }}
+let _loadingSessionId = null;
+const sid = 'boot-session';
 const S = {{
   session: {{
+    session_id: sid,
     composer_draft: {json.dumps(draft)},
   }},
 }};
-let _loadingSessionId = null;
-const sid = 'boot-session';
 const currentSid = {json.dumps(current_sid)};
 const forceReload = {json.dumps(force_reload)};
 const opts = {json.dumps(opts or {})};
@@ -82,7 +93,7 @@ function _rememberComposerDraftPayloadState(sid, text, files) {{
   state.rememberedDraft = {{sid, text, files}};
 }}
 {suppression_block}
-if ({json.dumps(suppress_restore)}) _suppressComposerDraftRestoreAfterSubmit(sid);
+{suppress_call}
 {restore_fn}
 {draft_block}
 process.stdout.write(JSON.stringify({{
@@ -152,11 +163,26 @@ def test_same_session_submitted_clear_blocks_stale_server_draft_restore():
         opts={"preserveActiveInput": True},
         current_sid="boot-session",
         force_reload=True,
-        suppress_restore=True,
+        suppress_restore={"text": "old submitted suffix", "files": []},
     )
     assert data["value"] == ""
     assert data["autoResizeCount"] == 0
     assert data["updateSendBtnCount"] == 0
+
+
+def test_same_session_submitted_clear_allows_different_cross_tab_draft_restore():
+    """A different same-session draft saved by another tab must not be hidden by send-time suppression."""
+    data = _run_case(
+        initial_text="",
+        draft={"text": "new cross-tab draft", "files": []},
+        opts={"preserveActiveInput": True},
+        current_sid="boot-session",
+        force_reload=True,
+        suppress_restore={"text": "old submitted suffix", "files": []},
+    )
+    assert data["value"] == "new cross-tab draft"
+    assert data["autoResizeCount"] == 1
+    assert data["updateSendBtnCount"] == 1
 
 
 def test_cross_session_restore_keeps_existing_draft_semantics():

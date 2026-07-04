@@ -1029,8 +1029,10 @@ function _composerTextWithPendingSelections(){
 function _clearComposerAfterQueuedSelectionSend(){
   const sid=arguments.length?arguments[0]:(S.session&&S.session.session_id);
   const composer=(typeof $==='function'&&$('msg'))||document.getElementById('msg');
+  const draftText=composer?String(composer.value||''):'';
+  const draftFiles=Array.isArray(S.pendingFiles)?[...S.pendingFiles]:[];
   if(composer)composer.value='';
-  if(sid&&typeof _clearComposerDraft==='function') _clearComposerDraft(sid);
+  if(sid&&typeof _clearComposerDraft==='function') _clearComposerDraft(sid,draftText,draftFiles);
   _clearPendingSelections();
   if(typeof autoResize==='function') autoResize();
 }
@@ -1308,7 +1310,7 @@ async function send(){
       const _modelState=_chatPayloadModelState();
       queueSessionMessage(_targetSid,{text:_text,files:[...S.pendingFiles],model:_modelState.model,model_provider:_modelState.model_provider,profile:S.activeProfile||'default'});
       _clearComposerAfterQueuedSelectionSend();
-      if(_targetSid&&typeof _clearComposerDraft==='function') _clearComposerDraft(_targetSid);
+      if(_targetSid&&typeof _clearComposerDraft==='function'&&_targetSid!==(S.session&&S.session.session_id)) _clearComposerDraft(_targetSid,_text,S.pendingFiles?[...S.pendingFiles]:[]);
       S.pendingFiles=[];renderTray();
       updateQueueBadge(_targetSid);
       showToast(`Queued: "${_text.slice(0,40)}${_text.length>40?'…':''}"`,2000);
@@ -1365,6 +1367,7 @@ async function send(){
       }
     const defaultMessageMode=window._defaultMessageMode||'steer';
       if(defaultMessageMode==='steer'&&S.activeStreamId&&typeof _trySteer==='function'){
+        const _steerDraftFiles=Array.isArray(S.pendingFiles)?[...S.pendingFiles]:[];
         // Real steer: clear the input first so the user gets immediate
         // feedback, then ship the steer payload via /api/chat/steer.
         // _trySteer restores the draft and leaves the active stream running if
@@ -1376,7 +1379,7 @@ async function send(){
         // After a delivered steer, clear any staged files because the text-only
         // steer payload has been handled. On failure, keep files staged.
         if(_steerDelivered){S.pendingFiles=[];renderTray();}
-        if(_steerDelivered&&S.session&&typeof _clearComposerDraft==='function') _clearComposerDraft(S.session.session_id);
+        if(_steerDelivered&&S.session&&typeof _clearComposerDraft==='function') _clearComposerDraft(S.session.session_id,text,_steerDraftFiles);
       } else if(defaultMessageMode==='interrupt'){
         // Queue the message, then cancel so drain re-sends it.
         const _modelState=_chatPayloadModelState();
@@ -1581,7 +1584,8 @@ async function send(){
     }
   }
   if(!msgText){setComposerStatus('Nothing to send');return;}
-
+  const _submittedDraftTextForClear=$('msg').value||'';
+  const _submittedDraftFilesForClear=Array.isArray(_failedSendFilesSnapshot)?[..._failedSendFilesSnapshot]:[];
   $('msg').value='';autoResize();
   // Clear persisted composer draft since message was sent. Capture the promise
   // so the #5472 failed-send restore can chain its re-persist AFTER this clear
@@ -1589,7 +1593,7 @@ async function send(){
   // text:<draft>) can be reordered under HTTP/2 multiplexing and leave the
   // server draft empty after a reload. (Opus #5484 NIT.)
   let _composerDraftClearPromise=null;
-  if (activeSid && typeof _clearComposerDraft === 'function') _composerDraftClearPromise=_clearComposerDraft(activeSid);
+  if (activeSid && typeof _clearComposerDraft === 'function') _composerDraftClearPromise=_clearComposerDraft(activeSid,_submittedDraftTextForClear,_submittedDraftFilesForClear);
   const displayText=_slashDisplayTextOverride||text||(uploaded.length?`Uploaded: ${uploadedNames.join(', ')}`:'(file upload)');
   const userMsg={role:'user',content:displayText,attachments:uploaded.length?uploadedNames:undefined,_ts:Date.now()/1000};
   S.toolCalls=[];  // clear tool calls from previous turn

@@ -37,11 +37,44 @@ const _composerDraftKnownPayloadSessions = new Set();
 const _composerDraftRestoreSuppressedUntilBySid = new Map();
 const _COMPOSER_DRAFT_RESTORE_SUPPRESS_MS = 30000;
 
-function _suppressComposerDraftRestoreAfterSubmit(sid) {
+function _composerDraftFileSignature(file) {
+  if (typeof file === 'string') return { value: file };
+  if (!file || typeof file !== 'object') return { value: String(file || '') };
+  return {
+    name: String(file.name || file.filename || ''),
+    path: String(file.path || ''),
+    size: Number.isFinite(Number(file.size)) ? Number(file.size) : null,
+    type: String(file.type || file.mime || ''),
+  };
+}
+
+function _composerDraftPayloadSignature(text, files) {
+  const normalizedText = String(text || '');
+  const normalizedFiles = Array.isArray(files) ? files.filter(Boolean).map(_composerDraftFileSignature) : [];
+  return JSON.stringify({ text: normalizedText, files: normalizedFiles });
+}
+
+function _composerDraftPayloadSignatureForSid(sid) {
+  if (typeof S === 'undefined' || !S.session || S.session.session_id !== sid) return null;
+  const draft = S.session.composer_draft || null;
+  if (!draft) return null;
+  return _composerDraftPayloadSignature(draft.text, draft.files);
+}
+
+function _suppressComposerDraftRestoreAfterSubmit(sid, text, files) {
   if (!sid) return;
+  const previous = _composerDraftRestoreSuppressedUntilBySid.get(sid);
+  let signature = null;
+  if (arguments.length >= 2) {
+    signature = _composerDraftPayloadSignature(text, files);
+  } else if (previous && typeof previous === 'object') {
+    signature = previous.signature || null;
+  } else {
+    signature = _composerDraftPayloadSignatureForSid(sid);
+  }
   _composerDraftRestoreSuppressedUntilBySid.set(
     sid,
-    Date.now() + _COMPOSER_DRAFT_RESTORE_SUPPRESS_MS,
+    { until: Date.now() + _COMPOSER_DRAFT_RESTORE_SUPPRESS_MS, signature },
   );
   // Local state must reflect the submitted/cleared composer immediately. The
   // POST that clears the server-side draft is async; same-session refreshes can
@@ -54,15 +87,23 @@ function _clearComposerDraftRestoreSuppression(sid) {
   _composerDraftRestoreSuppressedUntilBySid.delete(sid);
 }
 
-function _isComposerDraftRestoreSuppressed(sid) {
+function _isComposerDraftRestoreSuppressed(sid, text, files) {
   if (!sid) return false;
-  const until = _composerDraftRestoreSuppressedUntilBySid.get(sid);
+  const suppression = _composerDraftRestoreSuppressedUntilBySid.get(sid);
+  if (!suppression) return false;
+  const until = (suppression && typeof suppression === 'object') ? suppression.until : suppression;
   if (!until) return false;
   if (Date.now() > until) {
     _composerDraftRestoreSuppressedUntilBySid.delete(sid);
     return false;
   }
-  return true;
+  const signature = (suppression && typeof suppression === 'object') ? suppression.signature : null;
+  // Legacy/unknown callers still fail closed for the current TTL, but all send
+  // paths now pass a payload signature so a different cross-tab draft can restore.
+  if (!signature) return true;
+  if (_composerDraftPayloadSignature(text, files) === signature) return true;
+  _composerDraftRestoreSuppressedUntilBySid.delete(sid);
+  return false;
 }
 
 function _profileMatchesActiveProfile(profile, activeProfile){
@@ -211,7 +252,7 @@ function _restoreComposerDraft(draft, targetSid, opts={}) {
   const restoreSid = targetSid || (S.session && S.session.session_id);
   const hasServerDraftPayload = _composerDraftHasPayload(text, files);
 
-  if (restoreSid && hasServerDraftPayload && _isComposerDraftRestoreSuppressed(restoreSid)) return;
+  if (restoreSid && hasServerDraftPayload && _isComposerDraftRestoreSuppressed(restoreSid, text, files)) return;
   if (restoreSid && !hasServerDraftPayload) _clearComposerDraftRestoreSuppression(restoreSid);
 
   // Same-session force refreshes are driven by external state changes and may
@@ -241,11 +282,12 @@ function _restoreComposerDraft(draft, targetSid, opts={}) {
 }
 
 // Clear the saved draft for a session (called when message is sent).
-function _clearComposerDraft(sid) {
+function _clearComposerDraft(sid, text, files) {
   if (!sid) return;
   clearTimeout(_draftSaveTimer);
   _clearRememberedNewChatDraftSession(sid);
-  _suppressComposerDraftRestoreAfterSubmit(sid);
+  if (arguments.length >= 2) _suppressComposerDraftRestoreAfterSubmit(sid, text, files);
+  else _suppressComposerDraftRestoreAfterSubmit(sid);
   return api('/api/session/draft', {
     method: 'POST',
     body: JSON.stringify({ session_id: sid, text: '' }),
