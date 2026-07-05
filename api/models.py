@@ -3306,10 +3306,10 @@ def _compression_recovery_child_matches(
     if source_profile is not _COMPRESSION_RECOVERY_PROFILE_UNSET:
         try:
             from api.profiles import _profiles_match
-            if not _profiles_match(getattr(session, "profile", None), source_profile):
-                return False
-        except Exception:
+        except (ImportError, AttributeError):
             logger.debug("Failed to profile-check compression recovery session", exc_info=True)
+            return False
+        if not _profiles_match(getattr(session, "profile", None), source_profile):
             return False
     return (
         str(getattr(session, "compression_recovery_source_session_id", "") or "").strip() == source_session_id
