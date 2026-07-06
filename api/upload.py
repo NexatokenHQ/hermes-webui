@@ -45,6 +45,41 @@ def _max_extracted_bytes() -> int:
 # authoritative value is _max_extracted_bytes(), read at extraction time.
 _MAX_EXTRACTED_BYTES = 10 * MAX_UPLOAD_BYTES
 
+def _zip_metadata_encoding() -> str | None:
+    """Optional override for legacy ZIP member-name decoding.
+
+    ZIP archives that do not set the UTF-8 filename flag are historically
+    decoded as CP437. That breaks many legacy Windows-produced archives whose
+    member names were actually written in GBK/CP936 (common for Chinese file
+    names). When HERMES_WEBUI_ZIP_METADATA_ENCODING is set, pass it through to
+    zipfile.ZipFile(metadata_encoding=...) for reads. Per the Python zipfile
+    contract, UTF-8-flagged archives still decode as UTF-8 and are unaffected.
+    """
+    raw = os.getenv("HERMES_WEBUI_ZIP_METADATA_ENCODING", "").strip()
+    if not raw:
+        return None
+    try:
+        import codecs
+        codecs.lookup(raw)
+    except LookupError as exc:
+        raise ValueError(f"Invalid ZIP metadata encoding: {raw}") from exc
+    return raw
+
+
+def _open_zip_for_read(file_bytes: bytes):
+    import io, zipfile
+
+    metadata_encoding = _zip_metadata_encoding()
+    if metadata_encoding:
+        try:
+            return zipfile.ZipFile(io.BytesIO(file_bytes), metadata_encoding=metadata_encoding)
+        except TypeError:
+            # Older unsupported Python versions (<3.11) do not expose the
+            # metadata_encoding kwarg. Fall back to the stdlib default so uploads
+            # keep working rather than hard-failing in an unsupported runtime.
+            pass
+    return zipfile.ZipFile(io.BytesIO(file_bytes))
+
 
 def parse_multipart(rfile, content_type, content_length) -> tuple:
     import re as _re, email.parser as _ep
@@ -248,7 +283,7 @@ def extract_archive(file_bytes: bytes, filename: str, workspace: Path):
 
     try:
         if _mode == 'zip':
-            with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+            with _open_zip_for_read(file_bytes) as zf:
                 for member in zf.infolist():
                     # Skip directories
                     if member.is_dir():

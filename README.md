@@ -368,6 +368,8 @@ Full list of environment variables:
 | `HERMES_WEBUI_SERVER_CWD` | *(unset)* | Working directory for the server process. Defaults to the agent dir; point it at a writable workspace when the agent dir is read-only so fallback relative writes land somewhere writable |
 | `HERMES_WEBUI_AGENT_CACHE_MAX` | `25` | Max live agent instances kept warm in the in-memory LRU. Each pins a full conversation transcript, so this is the dominant lever on resident memory — lower it on installs with many long sessions to cap RAM (at the cost of more cold reloads) |
 | `HERMES_WEBUI_SESSIONS_MAX` | `300` | Legacy operator override for the max compact `Session` objects held in the in-memory LRU. Prefer the `webui.sessions_cache_max` key in `config.yaml` (which takes precedence); this env var remains a fallback. Bounds resident memory so long-running installs cannot accumulate every session ever touched and eventually crash (#4765/#2233/#4633). Eviction only ever drops clean, persisted, non-active sessions — an evicted session lazily reloads from its JSON sidecar on next access |
+| `HERMES_WEBUI_MAX_EXTRACTED_MB` | `10 × HERMES_WEBUI_MAX_UPLOAD_MB` | Total uncompressed-byte cap when extracting uploaded archives (`.zip`, `.tar*`) to guard against archive bombs |
+| `HERMES_WEBUI_ZIP_METADATA_ENCODING` | *(unset)* | Optional codec for legacy ZIP member names when the archive omitted the UTF-8 filename flag (for example `gbk` / `cp936` for some Chinese Windows ZIPs). UTF-8-flagged ZIPs are unaffected |
 
 Extension deployments can inspect sanitized, authenticated diagnostics at `GET /api/extensions/status`; see [WebUI Extensions](docs/EXTENSIONS.md#diagnostics).
 

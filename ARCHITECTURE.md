@@ -141,6 +141,8 @@ Environment variables controlling behavior:
     HERMES_WEBUI_PREFILL_MESSAGES_SCRIPT_TIMEOUT Optional script timeout in seconds (default 5, max 30)
     HERMES_WEBUI_PREFILL_CONTEXT_MAX_CHARS Optional parsed prefill budget in characters (default 12000, 0 disables)
     HERMES_HOME                    Base directory for Hermes state (~/.hermes by default)
+    HERMES_WEBUI_MAX_EXTRACTED_MB    Optional extracted-byte cap for uploaded archive extraction
+    HERMES_WEBUI_ZIP_METADATA_ENCODING Optional legacy ZIP filename codec override for non-UTF-8 archives
 
 Test isolation environment variables (set by conftest.py):
 

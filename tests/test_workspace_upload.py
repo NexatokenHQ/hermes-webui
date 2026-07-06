@@ -18,6 +18,7 @@ import urllib.request
 import urllib.error
 import pathlib
 import zipfile
+import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 
@@ -86,6 +87,63 @@ def _make_zip(members: dict[str, bytes]) -> bytes:
             zf.writestr(name, data)
     return buf.getvalue()
 
+
+def _make_legacy_stored_zip(raw_name: bytes, data: bytes) -> bytes:
+    """Create a one-file ZIP whose member name is raw legacy-encoded bytes.
+
+    This mirrors ZIPs produced by older tooling that omitted the UTF-8 filename
+    flag and wrote names in a locale-specific encoding such as GBK/CP936.
+    """
+    import struct
+    import zlib
+
+    crc = zlib.crc32(data) & 0xFFFFFFFF
+    local = struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034B50,  # local file header signature
+        20,          # version needed to extract
+        0,           # general purpose bit flag (UTF-8 flag intentionally OFF)
+        zipfile.ZIP_STORED,
+        0,
+        0,
+        crc,
+        len(data),
+        len(data),
+        len(raw_name),
+        0,
+    ) + raw_name + data
+    central = struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014B50,  # central directory signature
+        20,          # version made by
+        20,          # version needed to extract
+        0,           # general purpose bit flag (UTF-8 flag intentionally OFF)
+        zipfile.ZIP_STORED,
+        0,
+        0,
+        crc,
+        len(data),
+        len(data),
+        len(raw_name),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ) + raw_name
+    eocd = struct.pack(
+        "<IHHHHIIH",
+        0x06054B50,  # end of central directory signature
+        0,
+        0,
+        1,
+        1,
+        len(central),
+        len(local),
+        0,
+    )
+    return local + central + eocd
 
 def _make_tar(members: dict[str, bytes], mode: str = "w") -> bytes:
     """Create a tar archive in memory (mode 'w' = uncompressed .tar)."""
@@ -492,6 +550,35 @@ class TestWorkspaceUploadArchiveSuffixes:
         # The raw .tar should have been removed after successful extraction.
         assert not (ws / "bundle.tar").exists()
 
+
+class TestWorkspaceUploadZipMetadataEncoding:
+    def test_extract_archive_honors_legacy_zip_metadata_encoding(self, tmp_path, monkeypatch):
+        """Legacy ZIPs without the UTF-8 flag can still unpack Chinese filenames.
+"""
+        from api.upload import extract_archive
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("HERMES_WEBUI_ZIP_METADATA_ENCODING", "gbk")
+
+        zip_data = _make_legacy_stored_zip("中文.txt".encode("gbk"), b"legacy name")
+        result = extract_archive(zip_data, "legacy.zip", workspace)
+
+        extract_dir = pathlib.Path(result["dest"])
+        assert extract_dir == workspace / "legacy"
+        assert (extract_dir / "中文.txt").read_bytes() == b"legacy name"
+        assert result["files"] == ["legacy/中文.txt"]
+
+    def test_invalid_zip_metadata_encoding_is_rejected(self, tmp_path, monkeypatch):
+        from api.upload import extract_archive
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        monkeypatch.setenv("HERMES_WEBUI_ZIP_METADATA_ENCODING", "not-a-real-codec")
+
+        zip_data = _make_legacy_stored_zip(b"plain.txt", b"data")
+        with pytest.raises(ValueError, match="Invalid ZIP metadata encoding"):
+            extract_archive(zip_data, "legacy.zip", workspace)
 
 class TestWorkspaceUploadSymlinkTarget:
     def test_symlink_subpath_target_is_rejected(self, cleanup_test_sessions):
